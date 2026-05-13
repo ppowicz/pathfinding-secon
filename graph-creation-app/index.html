@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SECON Pathfinding</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="panel">
+        <div class="panel-top">
+          <h1>SECON Pathfinding</h1>
+
+          <div class="group">
+            <button id="pick-folder-btn" type="button">Wybierz Folder Danych</button>
+            <button id="reload-btn" type="button">Wczytaj Z Plików</button>
+          </div>
+
+          <div class="group mode-group">
+            <span>Tryb pracy</span>
+            <div class="mode-buttons">
+              <button id="mode-points-btn" type="button" class="active">Tryb punktów</button>
+              <button id="mode-edges-btn" type="button">Tryb połączeń</button>
+            </div>
+          </div>
+
+          <div class="group info-group">
+            <div><strong>Punkty:</strong> <span id="points-count">0</span></div>
+            <div><strong>Połączenia:</strong> <span id="edges-count">0</span></div>
+            <div><strong>Status:</strong> <span id="status-text">Uruchamianie...</span></div>
+          </div>
+        </div>
+
+        <div id="live-controls" class="live-controls" aria-live="polite">
+          <div id="live-controls-title" class="live-controls-title"></div>
+          <ul id="live-controls-list" class="live-controls-list"></ul>
+        </div>
+      </aside>
+
+      <main class="map-wrap">
+        <div id="map" aria-label="Mapa kampusu"></div>
+      </main>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
