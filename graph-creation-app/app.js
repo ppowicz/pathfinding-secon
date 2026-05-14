@@ -26,6 +26,10 @@ const state = {
   draftLine: null,
   justDraggedPointId: null,
   justDraggedUntil: 0,
+  pointSort: {
+    key: null,
+    direction: null,
+  },
 };
 let persistChain = Promise.resolve();
 
@@ -36,9 +40,13 @@ const el = {
   modeEdgesBtn: document.getElementById("mode-edges-btn"),
   pointsCount: document.getElementById("points-count"),
   edgesCount: document.getElementById("edges-count"),
-  statusText: document.getElementById("status-text"),
+  mapStatus: document.getElementById("map-status"),
+  mapStatusIcon: document.getElementById("map-status-icon"),
+  mapStatusText: document.getElementById("map-status-text"),
   liveControlsTitle: document.getElementById("live-controls-title"),
   liveControlsList: document.getElementById("live-controls-list"),
+  pointsTableBody: document.getElementById("points-table-body"),
+  pointSortButtons: Array.from(document.querySelectorAll(".sort-header")),
 };
 
 const map = L.map("map", {
@@ -84,7 +92,7 @@ async function init() {
   wireUi();
   disableBrowserContextMenu();
 
-  setStatus("Sprawdzam zapisany folder danych...");
+  setStatus("Sprawdzam zapisany folder danych...", "loading");
   const restoredHandle = await loadDirectoryHandle();
 
   if (restoredHandle) {
@@ -92,12 +100,12 @@ async function init() {
     if (hasPermission) {
       state.dirHandle = restoredHandle;
       await loadAllFromDisk();
-      setStatus("Wczytano dane z poprzedniej sesji.");
+      setStatus("Połączono z plikami danych.", "success");
     } else {
-      setStatus("Brak uprawnień do poprzedniego folderu. Wybierz folder danych.", true);
+      setStatus("Brak uprawnień do folderu danych. Wybierz folder ponownie.", "error");
     }
   } else {
-    setStatus("Wybierz folder danych, aby uruchomić autosave.");
+    setStatus("Brak połączenia z plikami danych. Wybierz folder danych.", "error");
   }
 
   applySettingsToMap();
@@ -112,11 +120,33 @@ function wireUi() {
   el.modePointsBtn.addEventListener("click", () => setMode("points", true));
   el.modeEdgesBtn.addEventListener("click", () => setMode("edges", true));
   window.addEventListener("keydown", onGlobalKeyDown);
+  for (const button of el.pointSortButtons) {
+    button.addEventListener("click", onPointSortClick);
+  }
 
   map.on("click", onMapLeftClick);
   map.on("contextmenu", onMapRightClick);
   map.on("mousemove", onMapMouseMove);
   map.on("moveend", onMapMoveEnd);
+}
+
+function onPointSortClick(event) {
+  const key = event.currentTarget.dataset.sortKey;
+  if (!key) {
+    return;
+  }
+
+  if (state.pointSort.key !== key) {
+    state.pointSort = { key, direction: "asc" };
+  } else if (state.pointSort.direction === "asc") {
+    state.pointSort = { key, direction: "desc" };
+  } else if (state.pointSort.direction === "desc") {
+    state.pointSort = { key: null, direction: null };
+  } else {
+    state.pointSort = { key, direction: "asc" };
+  }
+
+  renderPointsTable();
 }
 
 function onGlobalKeyDown(event) {
@@ -144,6 +174,7 @@ async function onPickFolder() {
   }
 
   try {
+    setStatus("Wybierz folder danych...", "loading");
     const handle = await window.showDirectoryPicker({ mode: "readwrite" });
     const granted = await ensureDirectoryPermission(handle, "readwrite", true);
 
@@ -160,10 +191,10 @@ async function onPickFolder() {
     redrawAll();
     await persistAll();
 
-    setStatus("Folder podłączony. Autosave aktywny.");
+    setStatus("Połączono z plikami. Autosave aktywny.", "success");
   } catch (error) {
     if (error.name === "AbortError") {
-      setStatus("Wybór folderu anulowany.");
+      setStatus("Brak połączenia z plikami danych. Wybór folderu anulowany.", "error");
       return;
     }
     setStatus(`Nie udało się podłączyć folderu: ${error.message}`, true);
@@ -177,11 +208,12 @@ async function onReloadFromDisk() {
   }
 
   try {
+    setStatus("Wczytywanie danych z plików...", "loading");
     await loadAllFromDisk();
     applySettingsToMap();
     setMode(state.settings.lastMode || "points", false);
     redrawAll();
-    setStatus("Dane zostały odświeżone z plików.");
+    setStatus("Dane zostały odświeżone z plików.", "success");
   } catch (error) {
     setStatus(`Błąd odczytu plików: ${error.message}`, true);
   }
@@ -486,21 +518,21 @@ function renderLiveControls() {
 
   if (state.mode === "points") {
     items.push("<code>LMB</code> na mapie: dodaj punkt");
-    items.push("<code>LMB + przeciągnięcie</code> punktu: przesuń punkt");
+    items.push("<code>LMB + drag</code> punktu: przesuń punkt");
     items.push("<code>RMB</code> na punkcie: usuń punkt");
     items.push("<code>RMB</code> na połączeniu: usuń połączenie");
     items.push("<code>Dwuklik</code> na punkcie: edytuj nazwę");
     items.push("<code>Tab</code>: przełącz na tryb połączeń");
   } else if (state.sourcePointId === null) {
     items.push("<code>LMB</code> na punkcie: wybierz punkt źródłowy");
-    items.push("<code>LMB + przeciągnięcie</code> punktu: przesuń punkt");
+    items.push("<code>LMB + drag</code> punktu: przesuń punkt");
     items.push("<code>RMB</code> na punkcie: usuń punkt");
     items.push("<code>RMB</code> na połączeniu: usuń połączenie");
     items.push("<code>Tab</code>: przełącz na tryb punktów");
   } else {
     items.push(`<code>LMB</code> na innym punkcie: utwórz połączenie z #${state.sourcePointId}`);
     items.push("<code>RMB</code> na mapie lub punkcie: anuluj tworzenie połączenia");
-    items.push("<code>LMB + przeciągnięcie</code> punktu: przesuń punkt");
+    items.push("<code>LMB + drag</code> punktu: przesuń punkt");
     items.push("<code>RMB</code> na połączeniu: usuń połączenie");
     items.push("<code>Tab</code>: przełącz na tryb punktów");
   }
@@ -672,6 +704,79 @@ function formatEdgeTooltip(edge) {
 function refreshCounters() {
   el.pointsCount.textContent = String(state.points.length);
   el.edgesCount.textContent = String(state.edges.length);
+  renderPointsTable();
+}
+
+function renderPointsTable() {
+  const rows = getSortedPointsForTable();
+  if (rows.length === 0) {
+    el.pointsTableBody.innerHTML = '<tr class="empty-row"><td colspan="4">Brak punktów.</td></tr>';
+  } else {
+    el.pointsTableBody.innerHTML = rows
+      .map(
+        (point) =>
+          `<tr>
+            <td class="numeric">${point.id}</td>
+            <td class="numeric">${point.lat.toFixed(7)}</td>
+            <td class="numeric">${point.lon.toFixed(7)}</td>
+            <td>${escapeHtml(point.name || "")}</td>
+          </tr>`
+      )
+      .join("");
+  }
+
+  updatePointSortHeaderLabels();
+}
+
+function getSortedPointsForTable() {
+  const rows = [...state.points];
+  const { key, direction } = state.pointSort;
+  if (!key || !direction) {
+    return rows;
+  }
+
+  const directionFactor = direction === "asc" ? 1 : -1;
+  rows.sort((a, b) => comparePointsByKey(a, b, key) * directionFactor);
+  return rows;
+}
+
+function comparePointsByKey(a, b, key) {
+  if (key === "id" || key === "lat" || key === "lon") {
+    return a[key] - b[key];
+  }
+
+  if (key === "name") {
+    const nameA = (a.name || "").toLocaleLowerCase("pl");
+    const nameB = (b.name || "").toLocaleLowerCase("pl");
+    return nameA.localeCompare(nameB, "pl");
+  }
+
+  return 0;
+}
+
+function updatePointSortHeaderLabels() {
+  for (const button of el.pointSortButtons) {
+    const key = button.dataset.sortKey;
+    const baseLabel = button.dataset.baseLabel || "";
+    let suffix = "";
+
+    if (state.pointSort.key === key) {
+      suffix = state.pointSort.direction === "asc" ? " ↑" : state.pointSort.direction === "desc" ? " ↓" : "";
+    }
+
+    button.textContent = `${baseLabel}${suffix}`;
+    button.classList.toggle("active", state.pointSort.key === key);
+    button.setAttribute("aria-sort", state.pointSort.key === key ? state.pointSort.direction : "none");
+  }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function persistAll() {
@@ -970,9 +1075,17 @@ function roundDistance(value) {
   return Number(value.toFixed(2));
 }
 
-function setStatus(message, isError = false) {
-  el.statusText.textContent = message;
-  el.statusText.classList.toggle("error", isError);
+function setStatus(message, stateOrError = "success") {
+  let statusState = "success";
+  if (typeof stateOrError === "boolean") {
+    statusState = stateOrError ? "error" : "success";
+  } else if (stateOrError === "loading" || stateOrError === "error" || stateOrError === "success") {
+    statusState = stateOrError;
+  }
+
+  el.mapStatusText.textContent = message;
+  el.mapStatus.classList.remove("is-loading", "is-success", "is-error");
+  el.mapStatus.classList.add(`is-${statusState}`);
 }
 
 async function openHandleDb() {

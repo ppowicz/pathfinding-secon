@@ -34,7 +34,6 @@
           <div class="group info-group">
             <div><strong>Punkty:</strong> <span id="points-count">0</span></div>
             <div><strong>Połączenia:</strong> <span id="edges-count">0</span></div>
-            <div><strong>Status:</strong> <span id="status-text">Uruchamianie...</span></div>
           </div>
         </div>
 
@@ -46,7 +45,49 @@
 
       <main class="map-wrap">
         <div id="map" aria-label="Mapa kampusu"></div>
+        <div id="map-status" class="map-status is-loading" aria-live="polite">
+          <span id="map-status-icon" class="map-status-icon" aria-hidden="true"></span>
+          <span id="map-status-text" class="map-status-text">Uruchamianie...</span>
+        </div>
       </main>
+
+      <aside class="points-panel">
+        <h2>Lista punktów</h2>
+        <div class="points-table-wrap">
+          <table id="points-table" class="points-table">
+            <thead>
+              <tr>
+                <th>
+                  <button type="button" class="sort-header" data-sort-key="id" data-base-label="ID">
+                    ID
+                  </button>
+                </th>
+                <th>
+                  <button type="button" class="sort-header" data-sort-key="lat" data-base-label="Lat">
+                    Lat
+                  </button>
+                </th>
+                <th>
+                  <button type="button" class="sort-header" data-sort-key="lon" data-base-label="Lon">
+                    Lon
+                  </button>
+                </th>
+                <th>
+                  <button
+                    type="button"
+                    class="sort-header"
+                    data-sort-key="name"
+                    data-base-label="Nazwa"
+                  >
+                    Nazwa
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="points-table-body"></tbody>
+          </table>
+        </div>
+      </aside>
     </div>
 
     <script

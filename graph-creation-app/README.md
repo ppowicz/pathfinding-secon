@@ -20,6 +20,8 @@ Następnie otwórz: `http://localhost:8080`
 
 Na dole panelu bocznego jest stały panel, który pokazuje aktualnie dostępne skróty i akcje myszy zależnie od trybu/stanu.
 
+W lewym dolnym rogu mapy jest mały wskaźnik statusu plików (`spinner`/`check`/`cross`) z krótkim komunikatem.
+
 #### `Tryb punktów`
 - `LMB` na mapie: dodaje punkt
 - `RMB` na punkcie: usuwa punkt i powiązane połączenia
