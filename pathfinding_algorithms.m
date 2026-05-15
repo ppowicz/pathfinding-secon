@@ -14,7 +14,7 @@ function pathfinding_algorithms()
     methodLabel.Position = [20 18 70 25];
 
     methodDropdown = uidropdown(controlPanel);
-    methodDropdown.Position = [90 18 130 25];
+    methodDropdown.Position = [90 18 100 25];
     methodDropdown.Items = ["DFS (pierwszy sąsiad)", "DFS (losowy sąsiad)", ...
         "DFS (najmniejsza waga)", "Dijkstra", "A*", "D*", "Greedy Best-First Search"];
     methodDropdown.Value = "DFS (pierwszy sąsiad)";
@@ -22,21 +22,33 @@ function pathfinding_algorithms()
     % INPUT: NODE STARTOWY
     startLabel = uilabel(controlPanel);
     startLabel.Text = "Start ID:";
-    startLabel.Position = [235 18 65 25];
+    startLabel.Position = [200 18 65 25];
 
     startInput = uieditfield(controlPanel, "numeric");
-    startInput.Position = [300 18 70 25];
+    startInput.Position = [265 18 70 25];
     startInput.RoundFractionalValues = "on";
     startInput.Limits = [1 Inf];
     startInput.Enable = "off";
 
+    % INPUT: LICZBA POWTÓRZEŃ
+    iterationsLabel = uilabel(controlPanel);
+    iterationsLabel.Text = "Powtórzenia:";
+    iterationsLabel.Position = [345 18 70 25];
+
+    iterationsInput = uieditfield(controlPanel, "numeric");
+    iterationsInput.Position = [415 18 70 25];
+    iterationsInput.RoundFractionalValues = "on";
+    iterationsInput.Limits = [1 1000];
+    iterationsInput.Value = 1;
+    iterationsInput.Tooltip = "Liczba powtórzeń wyznaczenia trasy (dla algorytmów losowych)";
+
     % INPUT: NODE DOCELOWY
     targetLabel = uilabel(controlPanel);
     targetLabel.Text = "Cel ID:";
-    targetLabel.Position = [385 18 55 25];
+    targetLabel.Position = [495 18 55 25];
 
     targetInput = uieditfield(controlPanel, "numeric");
-    targetInput.Position = [440 18 70 25];
+    targetInput.Position = [550 18 70 25];
     targetInput.RoundFractionalValues = "on";
     targetInput.Limits = [1 Inf];
     targetInput.Enable = "off";
@@ -44,23 +56,23 @@ function pathfinding_algorithms()
     % PRZYCISK WYZNACZANIA TRASY
     findPathButton = uibutton(controlPanel, "push");
     findPathButton.Text = "Wyznacz trasę";
-    findPathButton.Position = [525 18 125 25];
+    findPathButton.Position = [630 18 125 25];
     findPathButton.Enable = "off";
 
     % OPCJE PRĘDKOŚCI SYMULACJI
     speedModeCheckbox = uicheckbox(controlPanel);
     speedModeCheckbox.Text = "Limituj prędkość";
-    speedModeCheckbox.Position = [660 18 130 25];
+    speedModeCheckbox.Position = [770 18 110 25];
     speedModeCheckbox.Value = false;
 
     speedSlider = uislider(controlPanel);
-    speedSlider.Position = [805 31 150 3];
+    speedSlider.Position = [890 31 100 3];
     speedSlider.Limits = [1 200];
     speedSlider.Value = 25;
     speedSlider.MajorTicks = [1 25 50 100 150 200];
     speedSlider.MinorTicks = [];
     speedInput = uieditfield(controlPanel, "numeric");
-    speedInput.Position = [960 18 70 25];
+    speedInput.Position = [990 18 70 25];
     speedInput.RoundFractionalValues = "on";
     speedInput.Limits = [1 200];
     speedInput.Value = 25;
@@ -72,17 +84,25 @@ function pathfinding_algorithms()
     footerLabel.FontSize = 13;
     footerLabel.Text = "Ładowanie danych...";
 
-    % POLE WYNIKÓW (KOPIOWALNE)
+    % POLE WYNIKÓW (UKRYTE - dane dostępne przez przycisk Kopiuj)
     resultsTextArea = uitextarea(fig);
     resultsTextArea.Position = [20 50 860 45];
-    resultsTextArea.Value = {"Wyniki symulacji pojawią się tutaj (format do kopiowania)."};
-    resultsTextArea.Editable = "on";
+    resultsTextArea.Value = {''};
+    resultsTextArea.Visible = "off";
+    resultsTextArea.Editable = "off";
     resultsTextArea.FontName = "Consolas";
     resultsTextArea.FontSize = 11;
 
+    % Przycisk kopiowania wyniku
+    copyButton = uibutton(fig, "push");
+    copyButton.Text = "Kopiuj wynik";
+    copyButton.Position = [900 50 85 30];
+    copyButton.Enable = "off";
+    copyButton.ButtonPushedFcn = @(btn, event) copyResultsToClipboard();
+
     resetButton = uibutton(fig, "push");
     resetButton.Text = "Resetuj widok";
-    resetButton.Position = [900 15 180 30];
+    resetButton.Position = [995 50 85 30];
     resetButton.Enable = "off";
 
     % MAPA
@@ -113,8 +133,13 @@ function pathfinding_algorithms()
     targetLabelText = gobjects(0);
     searchPathLine = gobjects(0);
     resultPathLine = gobjects(0);
-    edgeLineHandles = gobjects(0);
+    edgePlot = gobjects(0);
+    edgeLat = [];
+    edgeLon = [];
+    edgeFromIdx = [];
+    edgeToIdx = [];
     edgeOriginalColors = zeros(0, 3);
+    lastResultsCsv = "";  % Zmienna do przechowywania wyniku CSV do kopiowania
 
     % Przycisk resetu widoku
     resetButton.ButtonPushedFcn = @(btn, event) resetMapView();
@@ -151,7 +176,13 @@ function pathfinding_algorithms()
         maxEdgeDistance = max(edges.distance_m);
         [idToIndexMap, neighborsByIndex, neighborWeightsByIndex] = buildGraphStructures();
 
-        % RYSOWANIE KRAWĘDZI
+        % RYSOWANIE KRAWĘDZI (wydajność: jedna geoplot zamiast 1000+ obiektów)
+        edgeLat = [];
+        edgeLon = [];
+        edgeFromIdx = [];
+        edgeToIdx = [];
+        edgeOriginalColors = zeros(0, 3);
+        
         for i = 1:numberOfEdges
             fromId = edges.from_id(i);
             toId = edges.to_id(i);
@@ -165,8 +196,6 @@ function pathfinding_algorithms()
                 continue;
             end
 
-            latLine = [points.lat(fromIdx), points.lat(toIdx)];
-            lonLine = [points.lon(fromIdx), points.lon(toIdx)];
             if maxEdgeDistance > minEdgeDistance
                 normalizedDistance = (edges.distance_m(i) - minEdgeDistance) / ...
                     (maxEdgeDistance - minEdgeDistance);
@@ -181,10 +210,17 @@ function pathfinding_algorithms()
             % Krótsze krawędzie = bardziej zielone, dłuższe = bardziej czerwone.
             edgeColor = [colorFactor, 1 - colorFactor, 0];
 
-            edgeLineHandle = geoplot(gx, latLine, lonLine, "-", ...
-                "LineWidth", 1.2, "Color", edgeColor);
-            edgeLineHandles(end + 1) = edgeLineHandle; %#ok<AGROW>
-            edgeOriginalColors(end + 1, :) = edgeColor; %#ok<AGROW>
+            % Dodaj współrzędne z NaN separatorem
+            edgeLat = [edgeLat; points.lat(fromIdx); points.lat(toIdx); NaN];
+            edgeLon = [edgeLon; points.lon(fromIdx); points.lon(toIdx); NaN];
+            edgeFromIdx = [edgeFromIdx; fromIdx];
+            edgeToIdx = [edgeToIdx; toIdx];
+            edgeOriginalColors = [edgeOriginalColors; edgeColor];
+        end
+        
+        % Narysuj wszystkie krawędzie jednym geoplot
+        if ~isempty(edgeLat)
+            edgePlot = geoplot(gx, edgeLat, edgeLon, "-", "LineWidth", 1.2, "Color", [0.7 0.7 0]);
         end
 
         % RYSOWANIE WĘZŁÓW
@@ -222,21 +258,24 @@ function pathfinding_algorithms()
         refreshStartTargetPreview();
 
         % STOPKA PO ZAŁADOWANIU
-        footerLabel.Text = "Załadowano: " + numberOfNodes + ...
-            " węzłów, " + numberOfEdges + ...
-            " krawędzi.";
+        footerLabel.Text = "Gotowe: " + numberOfNodes + " węzłów, " + numberOfEdges + " krawędzi";
 
         resetButton.Enable = "on";
+        copyButton.Enable = "off";
 
     catch ME
         footerLabel.Text = "Błąd ładowania danych: " + ME.message;
         resetButton.Enable = "off";
+        copyButton.Enable = "off";
         startInput.Enable = "off";
         targetInput.Enable = "off";
         findPathButton.Enable = "off";
 
         uialert(fig, ME.message, "Błąd ładowania danych");
     end
+
+    objectCount = numel(findall(gx));
+    fprintf("Liczba obiektów na mapie: %d\n", objectCount);
 
     % RESET WIDOKU
     function resetMapView()
@@ -250,6 +289,7 @@ function pathfinding_algorithms()
         selectedMethod = strtrim(string(methodDropdown.Value));
         startNode = startInput.Value;
         targetNode = targetInput.Value;
+        numRepetitions = round(iterationsInput.Value);
 
         if isnan(startNode) || isnan(targetNode)
             footerLabel.Text = "Błąd: wpisz poprawny numer node'a startowego i docelowego.";
@@ -273,7 +313,6 @@ function pathfinding_algorithms()
 
         clearSearchVisuals();
         updateStartTargetMarkers(startNode, targetNode);
-        resultsTextArea.Value = {"ITERACJA... uruchamianie DFS..."};
 
         dfsVariant = resolveDfsVariant(selectedMethod);
         if dfsVariant == "unsupported"
@@ -289,27 +328,76 @@ function pathfinding_algorithms()
         setEdgeIterationStyle(true);
         cleanupEdgeStyle = onCleanup(@() setEdgeIterationStyle(false));
 
-        animateSearch = speedModeCheckbox.Value;
-        [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDfs( ...
-            startNode, targetNode, animateSearch, dfsVariant);
-        totalDistance = calculatePathDistance(pathIds);
+        % Tablica do zbierania wyników z każdego powtórzenia
+        allVisitedCounts = zeros(1, numRepetitions);
+        allDistances = zeros(1, numRepetitions);
+        allPathLengths = zeros(1, numRepetitions);
+        foundPathCount = 0;
+        lastPathIds = [];
+        lastVisitedNodeIds = [];
 
-        if foundPath
-            drawFinalPath(pathIds);
-            footerLabel.Text = "DFS: znaleziono trasę | Dystans: " + ...
-                formatDistance(totalDistance) + " | Odwiedzone węzły: " + visitedCount + ...
-                " | Operacje: " + operationCount + " | Iteracje: " + iterationCount + ...
-                " | Tryb: " + currentSpeedModeDescription();
+        % Animacja tylko dla pojedynczego powtórzenia
+        animateSearch = speedModeCheckbox.Value && (numRepetitions == 1);
+
+        % Pętla powtórzeń
+        for repIdx = 1:numRepetitions
+            if numRepetitions > 1
+                footerLabel.Text = "Powtórzenie " + repIdx + "/" + numRepetitions + "...";
+                drawnow limitrate;
+            end
+
+            [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDfs( ...
+                startNode, targetNode, animateSearch, dfsVariant);
+            totalDistance = calculatePathDistance(pathIds);
+
+            allVisitedCounts(repIdx) = visitedCount;
+            allDistances(repIdx) = totalDistance;
+            allPathLengths(repIdx) = numel(pathIds);
+
+            if foundPath
+                foundPathCount = foundPathCount + 1;
+                lastPathIds = pathIds;
+                lastVisitedNodeIds = visitedNodeIds;
+            end
+        end
+
+        % Jeśli było jedno powtórzenie, narysuj ścieżkę
+        if numRepetitions == 1 && foundPathCount > 0
+            drawFinalPath(lastPathIds);
+            totalDistance = allDistances(1);
+            visitedCount = allVisitedCounts(1);
+            pathLength = allPathLengths(1);
+            foundPath = true;
+            footerLabel.Text = "Dystans: " + string(round(totalDistance, 2)) + " m | Odwiedzone: " + visitedCount;
         else
-            footerLabel.Text = "DFS: brak trasy z ID=" + startNode + " do ID=" + ...
-                targetNode + " | Dystans: brak | Odwiedzone węzły: " + visitedCount + ...
-                " | Operacje: " + operationCount + " | Iteracje: " + ...
-                iterationCount + ".";
+            % Jeśli było wiele powtórzeń, pokaż statystykę
+            if foundPathCount > 0
+                avgVisited = mean(allVisitedCounts);
+                avgDistance = mean(allDistances);
+                avgPathLength = mean(allPathLengths);
+                minVisited = min(allVisitedCounts);
+                maxVisited = max(allVisitedCounts);
+
+                footerLabel.Text = "Średnia: " + string(round(avgDistance, 2)) + " m | Odwiedzone: " + ...
+                    string(round(avgVisited, 1)) + " (min: " + minVisited + ", max: " + maxVisited + ")";
+
+                % Użyj średnich do wyświetlenia
+                totalDistance = avgDistance;
+                visitedCount = round(avgVisited);
+                pathLength = round(avgPathLength);
+                foundPath = true;
+            else
+                footerLabel.Text = "Brak trasy w żadnym powtórzeniu (" + numRepetitions + "x)";
+                totalDistance = 0;
+                visitedCount = 0;
+                pathLength = 0;
+                foundPath = false;
+            end
         end
 
         updateCopyableResults( ...
-            selectedMethod, startNode, targetNode, foundPath, pathIds, ...
-            visitedNodeIds, visitedCount, operationCount, iterationCount, totalDistance);
+            selectedMethod, startNode, targetNode, foundPath, lastPathIds, ...
+            lastVisitedNodeIds, allVisitedCounts, allDistances, allPathLengths, numRepetitions);
 
         clear cleanupFindPathButton;
         clear cleanupNodeVisibility;
@@ -422,9 +510,7 @@ function pathfinding_algorithms()
         spinnerChars = ['|', '/', '-', '\'];
         spinnerChar = spinnerChars(mod(iterationCount - 1, numel(spinnerChars)) + 1);
         visitedCount = operationCount;
-        footerLabel.Text = string(spinnerChar) + " iteracja... " + ...
-            "iteracja=" + iterationCount + ", odwiedzone=" + visitedCount + ...
-            ", operacje=" + operationCount + ", dystans=--";
+        footerLabel.Text = string(spinnerChar) + " odwiedzone: " + visitedCount;
         drawnow limitrate;
     end
 
@@ -505,31 +591,43 @@ function pathfinding_algorithms()
     end
 
     function updateCopyableResults(selectedMethod, startNode, targetNode, foundPath, ...
-            pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, totalDistance)
-        if foundPath
-            distanceText = formatDistance(totalDistance);
-            pathText = formatNodeIdList(pathIds);
-            statusText = "TRASA_ZNALEZIONA";
-        else
-            distanceText = "brak";
-            pathText = "[]";
-            statusText = "BRAK_TRASY";
+            pathIds, visitedNodeIds, allVisitedCounts, allDistances, allPathLengths, numRepetitions)
+        
+        % Format CSV z nagłówkiem i danymi z każdego powtórzenia
+        headerRow = "algorytm,start,end,distance_m,visited_node_count,final_path_node_count,repetition_num";
+        csvLines = [headerRow];
+        
+        for i = 1:numRepetitions
+            distanceValue = round(allDistances(i), 2);
+            visitedCount = allVisitedCounts(i);
+            pathNodeCount = allPathLengths(i);
+            
+            dataRow = string(selectedMethod) + "," + string(startNode) + "," + string(targetNode) + "," + ...
+                      string(distanceValue) + "," + string(visitedCount) + "," + string(pathNodeCount) + "," + ...
+                      string(i);
+            
+            csvLines = [csvLines; dataRow];
         end
-
-        visitedText = formatNodeIdList(visitedNodeIds);
-
-        resultsTextArea.Value = {
-            "ALGORYTM: " + selectedMethod
-            "STATUS: " + statusText
-            "START_ID: " + startNode
-            "CEL_ID: " + targetNode
-            "DYSTANS_TRASY: " + distanceText
-            "ODWIEDZONE_WEZLY_LICZBA: " + visitedCount
-            "OPERACJE: " + operationCount
-            "ITERACJE: " + iterationCount
-            "ODWIEDZONE_WEZLY: " + visitedText
-            "TRASA_WEZLY: " + pathText
-        };
+        
+        lastResultsCsv = strjoin(csvLines, newline);
+        
+        % Włącz przycisk kopiowania
+        copyButton.Enable = "on";
+        
+        % Wyświetl mini-podsumowanie w stopce
+        if numRepetitions > 1
+            avgDistance = mean(allDistances);
+            footerLabel.Text = "Średnia: " + string(round(avgDistance, 2)) + " m | Powtórzenia: " + numRepetitions;
+        else
+            footerLabel.Text = "Dystans: " + string(round(allDistances(1), 2)) + " m | Odwiedzone węzły: " + string(allVisitedCounts(1));
+        end
+    end
+    
+    function copyResultsToClipboard()
+        if ~isempty(lastResultsCsv)
+            clipboard('copy', lastResultsCsv);
+            footerLabel.Text = "✓ Wynik skopiowany do schowka";
+        end
     end
 
     function clearSearchVisuals()
@@ -659,19 +757,15 @@ function pathfinding_algorithms()
     end
 
     function setEdgeIterationStyle(isIteration)
-        if isempty(edgeLineHandles)
+        if isempty(edgePlot) || ~isgraphics(edgePlot)
             return;
         end
-
-        for i = 1:numel(edgeLineHandles)
-            if ~isgraphics(edgeLineHandles(i))
-                continue;
-            end
-            if isIteration
-                edgeLineHandles(i).Color = [0 0 0];
-            else
-                edgeLineHandles(i).Color = edgeOriginalColors(i, :);
-            end
+        
+        if isIteration
+            edgePlot.Color = [0 0 0];  % Czarny podczas iteracji
+        else
+            % Przywróć żółty (ton neutralny, bo mamy mix kolorów)
+            edgePlot.Color = [0.7 0.7 0];
         end
     end
 
