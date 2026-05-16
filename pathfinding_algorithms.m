@@ -33,10 +33,10 @@ function pathfinding_algorithms()
     % INPUT: LICZBA POWTÓRZEŃ
     iterationsLabel = uilabel(controlPanel);
     iterationsLabel.Text = "Powtórzenia:";
-    iterationsLabel.Position = [345 18 70 25];
+    iterationsLabel.Position = [480 18 70 25];
 
     iterationsInput = uieditfield(controlPanel, "numeric");
-    iterationsInput.Position = [415 18 70 25];
+    iterationsInput.Position = [555 18 55 25];
     iterationsInput.RoundFractionalValues = "on";
     iterationsInput.Limits = [1 1000];
     iterationsInput.Value = 1;
@@ -45,10 +45,10 @@ function pathfinding_algorithms()
     % INPUT: NODE DOCELOWY
     targetLabel = uilabel(controlPanel);
     targetLabel.Text = "Cel ID:";
-    targetLabel.Position = [495 18 55 25];
+    targetLabel.Position = [345 18 55 25];
 
     targetInput = uieditfield(controlPanel, "numeric");
-    targetInput.Position = [550 18 70 25];
+    targetInput.Position = [400 18 70 25];
     targetInput.RoundFractionalValues = "on";
     targetInput.Limits = [1 Inf];
     targetInput.Enable = "off";
@@ -72,7 +72,7 @@ function pathfinding_algorithms()
     speedSlider.MajorTicks = [1 25 50 100 150 200];
     speedSlider.MinorTicks = [];
     speedInput = uieditfield(controlPanel, "numeric");
-    speedInput.Position = [990 18 70 25];
+    speedInput.Position = [1010 18 30 25];
     speedInput.RoundFractionalValues = "on";
     speedInput.Limits = [1 200];
     speedInput.Value = 25;
@@ -274,227 +274,6 @@ function pathfinding_algorithms()
         uialert(fig, ME.message, "Błąd ładowania danych");
     end
 
-    function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDijkstra(startNode, targetNode, animateSearch)
-        numberOfNodes = height(points);
-        dist = inf(numberOfNodes, 1);
-        prevIdx = nan(numberOfNodes, 1);
-        visited = false(numberOfNodes, 1);
-
-        startIdx = idToIndexMap(startNode);
-        targetIdx = idToIndexMap(targetNode);
-
-        dist(startIdx) = 0;
-
-        pathIds = [];
-        visitedNodeIds = [];
-        operationCount = 0;
-        iterationCount = 0;
-        foundPath = false;
-
-        while true
-            unvisitedIdx = find(~visited);
-            if isempty(unvisitedIdx)
-                break;
-            end
-            [minVal, localPos] = min(dist(unvisitedIdx));
-            if isinf(minVal)
-                break;
-            end
-            u = unvisitedIdx(localPos);
-
-            % Mark visited
-            visited(u) = true;
-            visitedNodeIds(end+1) = points.id(u); %#ok<AGROW>
-            operationCount = operationCount + 1;
-            iterationCount = iterationCount + 1;
-            updateIterationFooter(iterationCount, operationCount);
-
-            % If we've reached the target, stop
-            if u == targetIdx
-                foundPath = true;
-                break;
-            end
-
-            % Relax neighbors
-            neigh = neighborsByIndex{u};
-            weights = neighborWeightsByIndex{u};
-            for k = 1:numel(neigh)
-                vId = neigh(k);
-                v = idToIndexMap(vId);
-                if visited(v)
-                    continue;
-                end
-                alt = dist(u) + weights(k);
-                if alt < dist(v)
-                    dist(v) = alt;
-                    prevIdx(v) = u;
-                end
-            end
-
-            if animateSearch
-                % Reconstruct current shortest path to u for visualization
-                cur = u;
-                curPath = [];
-                while ~isnan(cur)
-                    curPath(end+1) = points.id(cur); %#ok<AGROW>
-                    cur = prevIdx(cur);
-                end
-                curPath = fliplr(curPath);
-                if numel(curPath) >= 2
-                    drawSearchPath(curPath);
-                end
-                throttleSimulationStep();
-            end
-        end
-
-        % Reconstruct final path from target to start
-        if ~isnan(prevIdx(targetIdx)) || startIdx == targetIdx
-            if dist(targetIdx) < Inf
-                idxPath = [];
-                cur = targetIdx;
-                while ~isnan(cur)
-                    idxPath(end+1) = cur; %#ok<AGROW>
-                    if cur == startIdx
-                        break;
-                    end
-                    cur = prevIdx(cur);
-                    if isempty(cur)
-                        break;
-                    end
-                end
-                idxPath = fliplr(idxPath);
-                pathIds = points.id(idxPath);
-                foundPath = ~isempty(pathIds);
-            end
-        else
-            pathIds = [];
-            foundPath = false;
-        end
-
-        visitedCount = numel(visitedNodeIds);
-    end
-
-    function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runAStar(startNode, targetNode, animateSearch)
-        numberOfNodes = height(points);
-        g = inf(numberOfNodes, 1);
-        f = inf(numberOfNodes, 1);
-        cameFrom = nan(numberOfNodes, 1);
-        closed = false(numberOfNodes, 1);
-
-        startIdx = idToIndexMap(startNode);
-        targetIdx = idToIndexMap(targetNode);
-
-        % Heurystyka funkcja lokalna
-        function d = geoDist(idxA, idxB)
-            R = 6371000;
-            aLat = points.lat(idxA);
-            aLon = points.lon(idxA);
-            bLat = points.lat(idxB);
-            bLon = points.lon(idxB);
-            dlat = deg2rad(bLat - aLat);
-            dlon = deg2rad(bLon - aLon);
-            a = sin(dlat/2).^2 + cos(deg2rad(aLat)).*cos(deg2rad(bLat)).*sin(dlon/2).^2;
-            c = 2*atan2(sqrt(a), sqrt(1-a));
-            d = R * c;
-        end
-
-        g(startIdx) = 0;
-        f(startIdx) = geoDist(startIdx, targetIdx);
-
-        openSet = startIdx;
-
-        pathIds = [];
-        visitedNodeIds = [];
-        operationCount = 0;
-        iterationCount = 0;
-        foundPath = false;
-
-        while ~isempty(openSet)
-            % pick node in openSet with lowest f
-            [~, pos] = min(f(openSet));
-            u = openSet(pos);
-
-            % If target reached
-            if u == targetIdx
-                foundPath = true;
-                break;
-            end
-
-            % move u from openSet to closed
-            openSet(pos) = [];
-            closed(u) = true;
-            visitedNodeIds(end+1) = points.id(u); %#ok<AGROW>
-            operationCount = operationCount + 1;
-            iterationCount = iterationCount + 1;
-            updateIterationFooter(iterationCount, operationCount);
-
-            % For each neighbor
-            neigh = neighborsByIndex{u};
-            weights = neighborWeightsByIndex{u};
-            for k = 1:numel(neigh)
-                vId = neigh(k);
-                v = idToIndexMap(vId);
-                if closed(v)
-                    continue;
-                end
-                tentative_g = g(u) + weights(k);
-                if tentative_g < g(v)
-                    cameFrom(v) = u;
-                    g(v) = tentative_g;
-                    h = geoDist(v, targetIdx);
-                    f(v) = g(v) + h;
-                    % add to openSet if not present
-                    if ~any(openSet == v)
-                        openSet(end+1) = v; %#ok<AGROW>
-                    end
-                end
-            end
-
-            if animateSearch
-                % reconstruct path to current u for visualization
-                cur = u;
-                curPath = [];
-                while ~isnan(cur)
-                    curPath(end+1) = points.id(cur); %#ok<AGROW>
-                    if cur == startIdx
-                        break;
-                    end
-                    cur = cameFrom(cur);
-                    if isempty(cur)
-                        break;
-                    end
-                end
-                curPath = fliplr(curPath);
-                if numel(curPath) >= 2
-                    drawSearchPath(curPath);
-                end
-                throttleSimulationStep();
-            end
-        end
-
-        % Reconstruct final path if found
-        if foundPath
-            idxPath = [];
-            cur = targetIdx;
-            while ~isnan(cur)
-                idxPath(end+1) = cur; %#ok<AGROW>
-                if cur == startIdx
-                    break;
-                end
-                cur = cameFrom(cur);
-                if isempty(cur)
-                    break;
-                end
-            end
-            idxPath = fliplr(idxPath);
-            pathIds = points.id(idxPath);
-        else
-            pathIds = [];
-        end
-
-        visitedCount = numel(visitedNodeIds);
-    end
-
     objectCount = numel(findall(gx));
     fprintf("Liczba obiektów na mapie: %d\n", objectCount);
 
@@ -572,20 +351,29 @@ function pathfinding_algorithms()
                 drawnow limitrate;
             end
 
+            graphData.points = points;
+            graphData.idToIndexMap = idToIndexMap;
+            graphData.neighborsByIndex = neighborsByIndex;
+            graphData.neighborWeightsByIndex = neighborWeightsByIndex;
+
+            callbackData.updateIterationFooter = @updateIterationFooter;
+            callbackData.drawSearchPath = @drawSearchPath;
+            callbackData.throttleSimulationStep = @throttleSimulationStep;
+
             if isDfs
                 [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDfs( ...
-                    startNode, targetNode, animateSearch, dfsVariant);
+                    startNode, targetNode, graphData, animateSearch, dfsVariant, callbackData);
             elseif selectedMethod == "Dijkstra"
                 [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDijkstra( ...
-                    startNode, targetNode, animateSearch);
+                    startNode, targetNode, graphData, animateSearch, callbackData);
             elseif selectedMethod == "A*"
                 [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runAStar( ...
-                    startNode, targetNode, animateSearch);
+                    startNode, targetNode, graphData, animateSearch, callbackData);
             else
                 footerLabel.Text = "Algorytm " + selectedMethod + " nie jest jeszcze zaimplementowany.";
                 return;
             end
-            totalDistance = calculatePathDistance(pathIds);
+            totalDistance = graphPathDistance(pathIds, graphData);
 
             allVisitedCounts(repIdx) = visitedCount;
             allDistances(repIdx) = totalDistance;
@@ -641,132 +429,6 @@ function pathfinding_algorithms()
         clear cleanupEdgeStyle;
     end
 
-    function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDfs( ...
-            startNode, targetNode, animateSearch, dfsVariant)
-        numberOfNodes = height(points);
-        visited = false(numberOfNodes, 1);
-        pathIds = [];
-        visitedNodeIds = [];
-        operationCount = 0;
-        iterationCount = 0;
-        foundPath = false;
-
-        stackNodeIds = startNode;
-        startIdx = idToIndexMap(startNode);
-        visited(startIdx) = true;
-        visitedNodeIds = startNode;
-        operationCount = 1;
-        iterationCount = 1;
-
-        updateIterationFooter(iterationCount, operationCount);
-        if animateSearch
-            drawSearchPath(stackNodeIds);
-            throttleSimulationStep();
-        end
-
-        while ~isempty(stackNodeIds)
-            currentNodeId = stackNodeIds(end);
-
-            if currentNodeId == targetNode
-                pathIds = stackNodeIds;
-                foundPath = true;
-                break;
-            end
-
-            [nextNodeId, hasUnvisitedNeighbor] = firstUnvisitedNeighbor( ...
-                currentNodeId, visited, dfsVariant, targetNode);
-
-            if hasUnvisitedNeighbor
-                nextNodeIdx = idToIndexMap(nextNodeId);
-                visited(nextNodeIdx) = true;
-                stackNodeIds(end + 1) = nextNodeId; %#ok<AGROW>
-                visitedNodeIds(end + 1) = nextNodeId; %#ok<AGROW>
-
-                operationCount = operationCount + 1;
-                iterationCount = iterationCount + 1;
-                updateIterationFooter(iterationCount, operationCount);
-
-                if animateSearch
-                    drawSearchPath(stackNodeIds);
-                    throttleSimulationStep();
-                end
-            else
-                stackNodeIds(end) = [];
-                iterationCount = iterationCount + 1;
-                updateIterationFooter(iterationCount, operationCount);
-
-                if animateSearch
-                    drawSearchPath(stackNodeIds);
-                    drawnow limitrate;
-                end
-            end
-        end
-        visitedCount = numel(visitedNodeIds);
-    end
-
-    function [nextNodeId, hasUnvisitedNeighbor] = firstUnvisitedNeighbor(nodeId, visited, dfsVariant, targetNode)
-        nextNodeId = NaN;
-        hasUnvisitedNeighbor = false;
-
-        currentIdx = idToIndexMap(nodeId);
-        neighbors = neighborsByIndex{currentIdx};
-        neighborWeights = neighborWeightsByIndex{currentIdx};
-
-        if isempty(neighbors)
-            return;
-        end
-
-        unvisitedIdx = [];
-        for k = 1:numel(neighbors)
-            if ~visited(idToIndexMap(neighbors(k)))
-                unvisitedIdx(end + 1) = k; %#ok<AGROW>
-            end
-        end
-
-        if isempty(unvisitedIdx)
-            return;
-        end
-
-        switch dfsVariant
-            case "first"
-                chosenPosition = unvisitedIdx(1);
-            case "random"
-                chosenPosition = unvisitedIdx(randi(numel(unvisitedIdx)));
-            case "minweight"
-                [~, localOrder] = sort(neighborWeights(unvisitedIdx), "ascend");
-                chosenPosition = unvisitedIdx(localOrder(1));
-            case "closest"
-                % Wybierz sąsiada, którego współrzędne są najbliżej celu
-                if ~isKey(idToIndexMap, targetNode)
-                    chosenPosition = unvisitedIdx(1);
-                else
-                    targetIdx = idToIndexMap(targetNode);
-                    tLat = points.lat(targetIdx);
-                    tLon = points.lon(targetIdx);
-                    R = 6371000; % promien ziemi
-                    dists = zeros(1, numel(unvisitedIdx));
-                    for u = 1:numel(unvisitedIdx)
-                        neighId = neighbors(unvisitedIdx(u));
-                        neighIdx = idToIndexMap(neighId);
-                        nLat = points.lat(neighIdx);
-                        nLon = points.lon(neighIdx);
-                        dlat = deg2rad(nLat - tLat);
-                        dlon = deg2rad(nLon - tLon);
-                        a = sin(dlat/2).^2 + cos(deg2rad(tLat)).*cos(deg2rad(nLat)).*sin(dlon/2).^2;
-                        c = 2*atan2(sqrt(a), sqrt(1-a));
-                        dists(u) = R * c;
-                    end
-                    [~, order] = sort(dists, "ascend");
-                    chosenPosition = unvisitedIdx(order(1));
-                end
-            otherwise
-                chosenPosition = unvisitedIdx(1);
-        end
-
-        nextNodeId = neighbors(chosenPosition);
-        hasUnvisitedNeighbor = true;
-    end
-
     function updateIterationFooter(iterationCount, operationCount)
         spinnerChars = ['|', '/', '-', '\'];
         spinnerChar = spinnerChars(mod(iterationCount - 1, numel(spinnerChars)) + 1);
@@ -816,26 +478,6 @@ function pathfinding_algorithms()
             pointIdx = idToIndexMap(nodePathIds(p));
             pathLat(p) = points.lat(pointIdx);
             pathLon(p) = points.lon(pointIdx);
-        end
-    end
-
-    function totalDistance = calculatePathDistance(nodePathIds)
-        totalDistance = 0;
-        if numel(nodePathIds) < 2
-            return;
-        end
-
-        for p = 1:(numel(nodePathIds) - 1)
-            fromId = nodePathIds(p);
-            toId = nodePathIds(p + 1);
-            fromIdx = idToIndexMap(fromId);
-            neighbors = neighborsByIndex{fromIdx};
-            weights = neighborWeightsByIndex{fromIdx};
-            neighborPos = find(neighbors == toId, 1);
-            if isempty(neighborPos)
-                continue;
-            end
-            totalDistance = totalDistance + weights(neighborPos);
         end
     end
 
