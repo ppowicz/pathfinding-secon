@@ -16,7 +16,7 @@ function pathfinding_algorithms()
     methodDropdown = uidropdown(controlPanel);
     methodDropdown.Position = [90 18 100 25];
     methodDropdown.Items = ["DFS (pierwszy sąsiad)", "DFS (losowy sąsiad)", ...
-        "DFS (najmniejsza waga)", "DFS (najbliższe do celu)", "Dijkstra", "A*", "Greedy Best-First Search"];
+        "DFS (najmniejsza waga)", "DFS (najbliższe do celu)", "BFS (wszerz)", "Dijkstra", "A*", "Greedy Best-First Search"];
     methodDropdown.Value = "DFS (pierwszy sąsiad)";
 
     % INPUT: NODE STARTOWY
@@ -368,6 +368,12 @@ function pathfinding_algorithms()
                     startNode, targetNode, graphData, animateSearch, callbackData);
             elseif selectedMethod == "A*"
                 [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runAStar( ...
+                    startNode, targetNode, graphData, animateSearch, callbackData);
+            elseif selectedMethod == "Greedy Best-First Search"
+                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runGreedyBestFirst( ...
+                    startNode, targetNode, graphData, animateSearch, callbackData);
+            elseif selectedMethod == "BFS (wszerz)"
+                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runBfs( ...
                     startNode, targetNode, graphData, animateSearch, callbackData);
             else
                 footerLabel.Text = "Algorytm " + selectedMethod + " nie jest jeszcze zaimplementowany.";
