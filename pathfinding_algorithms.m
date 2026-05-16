@@ -16,7 +16,7 @@ function pathfinding_algorithms()
     methodDropdown = uidropdown(controlPanel);
     methodDropdown.Position = [90 18 100 25];
     methodDropdown.Items = ["DFS (pierwszy sąsiad)", "DFS (losowy sąsiad)", ...
-        "DFS (najmniejsza waga)", "DFS (najbliższe do celu)", "Dijkstra", "A*", "D*", "Greedy Best-First Search"];
+        "DFS (najmniejsza waga)", "DFS (najbliższe do celu)", "Dijkstra", "A*", "Greedy Best-First Search"];
     methodDropdown.Value = "DFS (pierwszy sąsiad)";
 
     % INPUT: NODE STARTOWY
@@ -374,6 +374,127 @@ function pathfinding_algorithms()
         visitedCount = numel(visitedNodeIds);
     end
 
+    function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runAStar(startNode, targetNode, animateSearch)
+        numberOfNodes = height(points);
+        g = inf(numberOfNodes, 1);
+        f = inf(numberOfNodes, 1);
+        cameFrom = nan(numberOfNodes, 1);
+        closed = false(numberOfNodes, 1);
+
+        startIdx = idToIndexMap(startNode);
+        targetIdx = idToIndexMap(targetNode);
+
+        % Heurystyka funkcja lokalna
+        function d = geoDist(idxA, idxB)
+            R = 6371000;
+            aLat = points.lat(idxA);
+            aLon = points.lon(idxA);
+            bLat = points.lat(idxB);
+            bLon = points.lon(idxB);
+            dlat = deg2rad(bLat - aLat);
+            dlon = deg2rad(bLon - aLon);
+            a = sin(dlat/2).^2 + cos(deg2rad(aLat)).*cos(deg2rad(bLat)).*sin(dlon/2).^2;
+            c = 2*atan2(sqrt(a), sqrt(1-a));
+            d = R * c;
+        end
+
+        g(startIdx) = 0;
+        f(startIdx) = geoDist(startIdx, targetIdx);
+
+        openSet = startIdx;
+
+        pathIds = [];
+        visitedNodeIds = [];
+        operationCount = 0;
+        iterationCount = 0;
+        foundPath = false;
+
+        while ~isempty(openSet)
+            % pick node in openSet with lowest f
+            [~, pos] = min(f(openSet));
+            u = openSet(pos);
+
+            % If target reached
+            if u == targetIdx
+                foundPath = true;
+                break;
+            end
+
+            % move u from openSet to closed
+            openSet(pos) = [];
+            closed(u) = true;
+            visitedNodeIds(end+1) = points.id(u); %#ok<AGROW>
+            operationCount = operationCount + 1;
+            iterationCount = iterationCount + 1;
+            updateIterationFooter(iterationCount, operationCount);
+
+            % For each neighbor
+            neigh = neighborsByIndex{u};
+            weights = neighborWeightsByIndex{u};
+            for k = 1:numel(neigh)
+                vId = neigh(k);
+                v = idToIndexMap(vId);
+                if closed(v)
+                    continue;
+                end
+                tentative_g = g(u) + weights(k);
+                if tentative_g < g(v)
+                    cameFrom(v) = u;
+                    g(v) = tentative_g;
+                    h = geoDist(v, targetIdx);
+                    f(v) = g(v) + h;
+                    % add to openSet if not present
+                    if ~any(openSet == v)
+                        openSet(end+1) = v; %#ok<AGROW>
+                    end
+                end
+            end
+
+            if animateSearch
+                % reconstruct path to current u for visualization
+                cur = u;
+                curPath = [];
+                while ~isnan(cur)
+                    curPath(end+1) = points.id(cur); %#ok<AGROW>
+                    if cur == startIdx
+                        break;
+                    end
+                    cur = cameFrom(cur);
+                    if isempty(cur)
+                        break;
+                    end
+                end
+                curPath = fliplr(curPath);
+                if numel(curPath) >= 2
+                    drawSearchPath(curPath);
+                end
+                throttleSimulationStep();
+            end
+        end
+
+        % Reconstruct final path if found
+        if foundPath
+            idxPath = [];
+            cur = targetIdx;
+            while ~isnan(cur)
+                idxPath(end+1) = cur; %#ok<AGROW>
+                if cur == startIdx
+                    break;
+                end
+                cur = cameFrom(cur);
+                if isempty(cur)
+                    break;
+                end
+            end
+            idxPath = fliplr(idxPath);
+            pathIds = points.id(idxPath);
+        else
+            pathIds = [];
+        end
+
+        visitedCount = numel(visitedNodeIds);
+    end
+
     objectCount = numel(findall(gx));
     fprintf("Liczba obiektów na mapie: %d\n", objectCount);
 
@@ -456,6 +577,9 @@ function pathfinding_algorithms()
                     startNode, targetNode, animateSearch, dfsVariant);
             elseif selectedMethod == "Dijkstra"
                 [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDijkstra( ...
+                    startNode, targetNode, animateSearch);
+            elseif selectedMethod == "A*"
+                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runAStar( ...
                     startNode, targetNode, animateSearch);
             else
                 footerLabel.Text = "Algorytm " + selectedMethod + " nie jest jeszcze zaimplementowany.";
