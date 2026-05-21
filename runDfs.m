@@ -1,4 +1,4 @@
-function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDfs( ...
+function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath, cpuTime] = runDfs( ...
     startNode, targetNode, graphData, animateSearch, dfsVariant, callbacks)
 
 numberOfNodes = height(graphData.points);
@@ -8,6 +8,9 @@ visitedNodeIds = [];
 operationCount = 0;
 iterationCount = 0;
 foundPath = false;
+
+% High-resolution elapsed time measurement
+startTimer = tic;
 
 stackNodeIds = startNode;
 startIdx = graphData.idToIndexMap(startNode);
@@ -61,6 +64,9 @@ while ~isempty(stackNodeIds)
 end
 
 visitedCount = numel(visitedNodeIds);
+
+% finalize elapsed time (seconds)
+cpuTime = toc(startTimer);
 
 end
 

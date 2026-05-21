@@ -15,7 +15,7 @@ function pathfinding_algorithms()
 
     methodDropdown = uidropdown(controlPanel);
     methodDropdown.Position = [90 18 100 25];
-    methodDropdown.Items = ["DFS (pierwszy sąsiad)", "DFS (losowy sąsiad)", ...
+    methodDropdown.Items = ["Wszystkie", "DFS (pierwszy sąsiad)", "DFS (losowy sąsiad)", ...
         "DFS (najmniejsza waga)", "DFS (najbliższe do celu)", "BFS (wszerz)", "Dijkstra", "A*", "Greedy Best-First Search"];
     methodDropdown.Value = "DFS (pierwszy sąsiad)";
 
@@ -258,7 +258,7 @@ function pathfinding_algorithms()
         refreshStartTargetPreview();
 
         % STOPKA PO ZAŁADOWANIU
-        footerLabel.Text = "Gotowe: " + numberOfNodes + " węzłów, " + numberOfEdges + " krawędzi";
+        footerLabel.Text = "Gotowe: " + formatDisplayNumber(numberOfNodes) + " węzłów, " + formatDisplayNumber(numberOfEdges) + " krawędzi";
 
         resetButton.Enable = "on";
         copyButton.Enable = "off";
@@ -286,6 +286,7 @@ function pathfinding_algorithms()
 
     % OBSŁUGA PRZYCISKU WYZNACZ TRASĘ
     function handleFindPath()
+        try
         selectedMethod = strtrim(string(methodDropdown.Value));
         startNode = startInput.Value;
         targetNode = targetInput.Value;
@@ -302,12 +303,12 @@ function pathfinding_algorithms()
         end
 
         if ~ismember(startNode, points.id)
-            footerLabel.Text = "Błąd: node startowy ID=" + startNode + " nie istnieje.";
+            footerLabel.Text = "Błąd: node startowy ID=" + formatDisplayNumber(startNode) + " nie istnieje.";
             return;
         end
 
         if ~ismember(targetNode, points.id)
-            footerLabel.Text = "Błąd: node docelowy ID=" + targetNode + " nie istnieje.";
+            footerLabel.Text = "Błąd: node docelowy ID=" + formatDisplayNumber(targetNode) + " nie istnieje.";
             return;
         end
 
@@ -333,10 +334,93 @@ function pathfinding_algorithms()
         setEdgeIterationStyle(true);
         cleanupEdgeStyle = onCleanup(@() setEdgeIterationStyle(false));
 
+        methodsToRun = resolveMethodsToRun(selectedMethod);
+        runAllMethods = numel(methodsToRun) > 1;
+
+        aggregatedCsv = "";
+        for methodIdx = 1:numel(methodsToRun)
+            methodName = methodsToRun(methodIdx);
+
+            if runAllMethods
+                footerLabel.Text = "Algorytm " + methodName + " (" + formatDisplayNumber(methodIdx) + "/" + formatDisplayNumber(numel(methodsToRun)) + ")...";
+                drawnow limitrate;
+            end
+
+            try
+                [didRun, methodCsv] = runMethodSearch(methodName, startNode, targetNode, numRepetitions, runAllMethods);
+            catch ME
+                footerLabel.Text = "Błąd przy algorytmie " + methodName + ": " + ME.message;
+                didRun = false;
+                methodCsv = "";
+            end
+            if ~didRun
+                clear cleanupFindPathButton;
+                clear cleanupNodeVisibility;
+                clear cleanupEdgeStyle;
+                return;
+            end
+
+            if runAllMethods
+                % Aggregate CSVs: first method supplies header
+                if methodIdx == 1
+                    aggregatedCsv = methodCsv;
+                else
+                    lines = split(methodCsv, newline);
+                    if numel(lines) > 1
+                        dataLines = lines(2:end);
+                        aggregatedCsv = aggregatedCsv + newline + strjoin(dataLines, newline);
+                    end
+                end
+            else
+                aggregatedCsv = methodCsv;
+            end
+        end
+
+        % Set global lastResultsCsv so copy button uses aggregated content
+        lastResultsCsv = aggregatedCsv;
+
+        clear cleanupFindPathButton;
+        clear cleanupNodeVisibility;
+        clear cleanupEdgeStyle;
+        return;
+        catch ME
+            footerLabel.Text = "Błąd: " + ME.message;
+            try
+                set(findPathButton, "Enable", "on");
+            end
+            return;
+        end
+    end
+
+    function methodsToRun = resolveMethodsToRun(selectedMethod)
+        if selectedMethod == "Wszystkie"
+            methodsToRun = ["DFS (pierwszy sąsiad)", "DFS (losowy sąsiad)", ...
+                "DFS (najmniejsza waga)", "DFS (najbliższe do celu)", "BFS (wszerz)", "Dijkstra", "A*", "Greedy Best-First Search"];
+        else
+            methodsToRun = selectedMethod;
+        end
+    end
+
+    function [didRun, methodCsv] = runMethodSearch(selectedMethod, startNode, targetNode, numRepetitions, appendToExistingCsv)
+        selectedMethod = strtrim(string(selectedMethod));
+        isDfs = contains(selectedMethod, "DFS");
+        if isDfs
+            dfsVariant = resolveDfsVariant(selectedMethod);
+            if dfsVariant == "unsupported"
+                footerLabel.Text = "Algorytm " + selectedMethod + ...
+                    " nie jest jeszcze zaimplementowany. Obecnie dostępne: 4 warianty DFS.";
+                didRun = false;
+                return;
+            end
+        else
+            dfsVariant = "";
+        end
+
         % Tablica do zbierania wyników z każdego powtórzenia
         allVisitedCounts = zeros(1, numRepetitions);
         allDistances = zeros(1, numRepetitions);
         allPathLengths = zeros(1, numRepetitions);
+        allCpuTimes = zeros(1, numRepetitions);
         foundPathCount = 0;
         lastPathIds = [];
         lastVisitedNodeIds = [];
@@ -347,7 +431,7 @@ function pathfinding_algorithms()
         % Pętla powtórzeń
         for repIdx = 1:numRepetitions
             if numRepetitions > 1
-                footerLabel.Text = "Powtórzenie " + repIdx + "/" + numRepetitions + "...";
+                footerLabel.Text = "Powtórzenie " + formatDisplayNumber(repIdx) + "/" + formatDisplayNumber(numRepetitions) + "...";
                 drawnow limitrate;
             end
 
@@ -361,22 +445,23 @@ function pathfinding_algorithms()
             callbackData.throttleSimulationStep = @throttleSimulationStep;
 
             if isDfs
-                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDfs( ...
+                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath, cpuTime] = runDfs( ...
                     startNode, targetNode, graphData, animateSearch, dfsVariant, callbackData);
             elseif selectedMethod == "Dijkstra"
-                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runDijkstra( ...
+                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath, cpuTime] = runDijkstra( ...
                     startNode, targetNode, graphData, animateSearch, callbackData);
             elseif selectedMethod == "A*"
-                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runAStar( ...
+                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath, cpuTime] = runAStar( ...
                     startNode, targetNode, graphData, animateSearch, callbackData);
             elseif selectedMethod == "Greedy Best-First Search"
-                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runGreedyBestFirst( ...
+                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath, cpuTime] = runGreedyBestFirst( ...
                     startNode, targetNode, graphData, animateSearch, callbackData);
             elseif selectedMethod == "BFS (wszerz)"
-                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runBfs( ...
+                [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath, cpuTime] = runBfs( ...
                     startNode, targetNode, graphData, animateSearch, callbackData);
             else
                 footerLabel.Text = "Algorytm " + selectedMethod + " nie jest jeszcze zaimplementowany.";
+                didRun = false;
                 return;
             end
             totalDistance = graphPathDistance(pathIds, graphData);
@@ -384,6 +469,7 @@ function pathfinding_algorithms()
             allVisitedCounts(repIdx) = visitedCount;
             allDistances(repIdx) = totalDistance;
             allPathLengths(repIdx) = numel(pathIds);
+            allCpuTimes(repIdx) = cpuTime;
 
             if foundPath
                 foundPathCount = foundPathCount + 1;
@@ -393,13 +479,14 @@ function pathfinding_algorithms()
         end
 
         % Jeśli było jedno powtórzenie, narysuj ścieżkę
-        if numRepetitions == 1 && foundPathCount > 0
+        if numRepetitions == 1 && foundPathCount > 0 && ~appendToExistingCsv
             drawFinalPath(lastPathIds);
             totalDistance = allDistances(1);
             visitedCount = allVisitedCounts(1);
             pathLength = allPathLengths(1);
+            cpuTime = allCpuTimes(1);
             foundPath = true;
-            footerLabel.Text = "Dystans: " + string(round(totalDistance, 2)) + " m | Odwiedzone: " + visitedCount;
+            footerLabel.Text = "Dystans: " + formatDistance(totalDistance) + " | Odwiedzone: " + formatDisplayNumber(visitedCount) + " | CPU: " + formatCpuTimeMs(cpuTime);
         else
             % Jeśli było wiele powtórzeń, pokaż statystykę
             if foundPathCount > 0
@@ -409,8 +496,11 @@ function pathfinding_algorithms()
                 minVisited = min(allVisitedCounts);
                 maxVisited = max(allVisitedCounts);
 
-                footerLabel.Text = "Średnia: " + string(round(avgDistance, 2)) + " m | Odwiedzone: " + ...
-                    string(round(avgVisited, 1)) + " (min: " + minVisited + ", max: " + maxVisited + ")";
+                avgCpu = mean(allCpuTimes);
+                stdCpu = std(allCpuTimes);
+
+                footerLabel.Text = "Średnia: " + formatDistance(avgDistance) + " | Odwiedzone: " + ...
+                    formatDisplayNumber(round(avgVisited, 1), 1) + " (min: " + formatDisplayNumber(minVisited) + ", max: " + formatDisplayNumber(maxVisited) + ")" + " | CPU: " + formatCpuTimeMs(avgCpu) + " ± " + formatCpuTimeMs(stdCpu);
 
                 % Użyj średnich do wyświetlenia
                 totalDistance = avgDistance;
@@ -418,7 +508,7 @@ function pathfinding_algorithms()
                 pathLength = round(avgPathLength);
                 foundPath = true;
             else
-                footerLabel.Text = "Brak trasy w żadnym powtórzeniu (" + numRepetitions + "x)";
+                footerLabel.Text = "Brak trasy w żadnym powtórzeniu (" + formatDisplayNumber(numRepetitions) + "x)";
                 totalDistance = 0;
                 visitedCount = 0;
                 pathLength = 0;
@@ -426,20 +516,18 @@ function pathfinding_algorithms()
             end
         end
 
-        updateCopyableResults( ...
+        methodCsv = updateCopyableResults( ...
             selectedMethod, startNode, targetNode, foundPath, lastPathIds, ...
-            lastVisitedNodeIds, allVisitedCounts, allDistances, allPathLengths, numRepetitions);
+            lastVisitedNodeIds, allVisitedCounts, allDistances, allPathLengths, allCpuTimes, numRepetitions, appendToExistingCsv);
 
-        clear cleanupFindPathButton;
-        clear cleanupNodeVisibility;
-        clear cleanupEdgeStyle;
+        didRun = true;
     end
 
     function updateIterationFooter(iterationCount, operationCount)
         spinnerChars = ['|', '/', '-', '\'];
         spinnerChar = spinnerChars(mod(iterationCount - 1, numel(spinnerChars)) + 1);
         visitedCount = operationCount;
-        footerLabel.Text = string(spinnerChar) + " odwiedzone: " + visitedCount;
+        footerLabel.Text = string(spinnerChar) + " odwiedzone: " + formatDisplayNumber(visitedCount);
         drawnow limitrate;
     end
 
@@ -488,7 +576,7 @@ function pathfinding_algorithms()
     end
 
     function outText = formatDistance(distanceMeters)
-        outText = string(round(distanceMeters, 2)) + " m";
+        outText = formatDisplayNumber(round(distanceMeters, 2), 2) + " m";
     end
 
     function outText = formatNodeIdList(nodeIds)
@@ -499,36 +587,71 @@ function pathfinding_algorithms()
         outText = "[" + strjoin(string(nodeIds), ", ") + "]";
     end
 
-    function updateCopyableResults(selectedMethod, startNode, targetNode, foundPath, ...
-            pathIds, visitedNodeIds, allVisitedCounts, allDistances, allPathLengths, numRepetitions)
-        
+    function outText = formatDisplayNumber(value, decimals)
+        if nargin < 2
+            decimals = 0;
+        end
+
+        rawText = string(sprintf("%.*f", decimals, value));
+        parts = split(rawText, ".");
+        integerPart = parts(1);
+
+        if startsWith(integerPart, "-")
+            signPart = "-";
+            integerDigits = extractAfter(integerPart, 1);
+        else
+            signPart = "";
+            integerDigits = integerPart;
+        end
+
+        groupedInteger = regexprep(char(integerDigits), '(?<=\d)(?=(\d{3})+$)', ' ');
+
+        if numel(parts) > 1 && decimals > 0
+            outText = signPart + string(groupedInteger) + "." + parts(2);
+        else
+            outText = signPart + string(groupedInteger);
+        end
+    end
+
+    function outText = formatCpuTimeMs(cpuSeconds)
+        outText = formatDisplayNumber(round(cpuSeconds * 1000, 2), 2) + " ms";
+    end
+
+        function resultsCsv = updateCopyableResults(selectedMethod, startNode, targetNode, foundPath, ...
+            pathIds, visitedNodeIds, allVisitedCounts, allDistances, allPathLengths, allCpuTimes, numRepetitions, appendToExistingCsv)
+
+        if nargin < 13
+            appendToExistingCsv = false;
+        end
+
         % Format CSV z nagłówkiem i danymi z każdego powtórzenia
-        headerRow = "algorytm,start,end,distance_m,visited_node_count,final_path_node_count,repetition_num";
-        csvLines = [headerRow];
-        
+        headerRow = "algorytm,start,end,distance_m,visited_node_count,final_path_node_count,cpu_time_s,repetition_num";
+        dataRows = strings(numRepetitions, 1);
+
         for i = 1:numRepetitions
             distanceValue = round(allDistances(i), 2);
             visitedCount = allVisitedCounts(i);
             pathNodeCount = allPathLengths(i);
-            
-            dataRow = string(selectedMethod) + "," + string(startNode) + "," + string(targetNode) + "," + ...
+
+            cpuValue = round(allCpuTimes(i), 6);
+            dataRows(i) = string(selectedMethod) + "," + string(startNode) + "," + string(targetNode) + "," + ...
                       string(distanceValue) + "," + string(visitedCount) + "," + string(pathNodeCount) + "," + ...
-                      string(i);
-            
-            csvLines = [csvLines; dataRow];
+                      string(cpuValue) + "," + string(i);
         end
-        
-        lastResultsCsv = strjoin(csvLines, newline);
-        
+
+        resultsCsv = strjoin([headerRow; dataRows], newline);
+
         % Włącz przycisk kopiowania
         copyButton.Enable = "on";
-        
+
         % Wyświetl mini-podsumowanie w stopce
         if numRepetitions > 1
             avgDistance = mean(allDistances);
-            footerLabel.Text = "Średnia: " + string(round(avgDistance, 2)) + " m | Powtórzenia: " + numRepetitions;
+            avgCpu = mean(allCpuTimes);
+            stdCpu = std(allCpuTimes);
+            footerLabel.Text = "Średnia: " + formatDistance(avgDistance) + " | Powtórzenia: " + formatDisplayNumber(numRepetitions) + " | CPU: " + formatCpuTimeMs(avgCpu) + " ± " + formatCpuTimeMs(stdCpu);
         else
-            footerLabel.Text = "Dystans: " + string(round(allDistances(1), 2)) + " m | Odwiedzone węzły: " + string(allVisitedCounts(1));
+            footerLabel.Text = "Dystans: " + formatDistance(allDistances(1)) + " | Odwiedzone węzły: " + formatDisplayNumber(allVisitedCounts(1)) + " | CPU: " + formatCpuTimeMs(allCpuTimes(1));
         end
     end
     

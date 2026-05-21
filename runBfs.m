@@ -1,4 +1,4 @@
-function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runBfs( ...
+function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath, cpuTime] = runBfs( ...
     startNode, targetNode, graphData, animateSearch, callbacks)
 
 numberOfNodes = height(graphData.points);
@@ -18,6 +18,9 @@ visitedNodeIds = [];
 operationCount = 0;
 iterationCount = 0;
 foundPath = false;
+
+% High-resolution elapsed time measurement
+startTimer = tic;
 
 while ~isempty(queue)
     % dequeue
@@ -86,5 +89,8 @@ else
 end
 
 visitedCount = numel(visitedNodeIds);
+
+% finalize elapsed time (seconds)
+cpuTime = toc(startTimer);
 
 end

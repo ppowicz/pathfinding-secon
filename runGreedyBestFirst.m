@@ -1,4 +1,4 @@
-function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runGreedyBestFirst( ...
+function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath, cpuTime] = runGreedyBestFirst( ...
     startNode, targetNode, graphData, animateSearch, callbacks)
 
 numberOfNodes = height(graphData.points);
@@ -24,6 +24,9 @@ visitedNodeIds = [];
 operationCount = 0;
 iterationCount = 0;
 foundPath = false;
+
+% High-resolution elapsed time measurement
+startTimer = tic;
 
 while ~isempty(pq)
     % pop element with smallest heuristic
@@ -95,6 +98,9 @@ else
 end
 
 visitedCount = numel(visitedNodeIds);
+
+% finalize elapsed time (seconds)
+cpuTime = toc(startTimer);
 end
 
 function distanceMeters = geoDistanceMeters(latA, lonA, latB, lonB)

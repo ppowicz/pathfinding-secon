@@ -1,4 +1,4 @@
-function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath] = runAStar( ...
+function [pathIds, visitedNodeIds, visitedCount, operationCount, iterationCount, foundPath, cpuTime] = runAStar( ...
     startNode, targetNode, graphData, animateSearch, callbacks)
 
 numberOfNodes = height(graphData.points);
@@ -22,6 +22,9 @@ visitedNodeIds = [];
 operationCount = 0;
 iterationCount = 0;
 foundPath = false;
+
+% High-resolution elapsed time measurement
+startTimer = tic;
 
 while ~isempty(openSet)
     [~, pos] = min(f(openSet));
@@ -80,6 +83,9 @@ else
 end
 
 visitedCount = numel(visitedNodeIds);
+
+% finalize elapsed time (seconds)
+cpuTime = toc(startTimer);
 
 end
 
