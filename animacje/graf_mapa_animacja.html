@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Graf -> Mapa (CSV)</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #1a1a1a;
+      --muted: #4f4f4f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      overflow: hidden;
+    }
+
+    #stage {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+    }
+
+    #overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: block;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .leaflet-control-container {
+      display: none !important;
+    }
+
+    #info {
+      display: none;
+    }
+
+    #error {
+      position: absolute;
+      left: 16px;
+      bottom: 16px;
+      z-index: 5;
+      color: #7a1111;
+      background: rgba(255, 241, 241, 0.95);
+      border: 1px solid rgba(160, 30, 30, 0.35);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+      display: none;
+      max-width: min(92vw, 820px);
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage" aria-label="Kliknij, aby przejść przez etapy animacji">
+    <div id="map"></div>
+    <canvas id="overlay"></canvas>
+
+    <div id="info">
+      <div class="title">Graf z CSV</div>
+      <div class="msg" id="msg">Ładowanie danych...</div>
+    </div>
+
+    <div id="error"></div>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    (async function main() {
+      const stage = document.getElementById("stage");
+      const canvas = document.getElementById("overlay");
+      const ctx = canvas.getContext("2d");
+      const msg = document.getElementById("msg");
+      const errorEl = document.getElementById("error");
+
+      let state = 0;
+      let points = [];
+      let edges = [];
+      let map = null;
+      let tileLayer = null;
+      let mapEdgeLines = [];
+      let mapNodeCircles = [];
+
+      let randomPositions = [];
+      let randomGeoPositions = [];
+      let truePositions = [];
+      let currentPositions = [];
+
+      let whiteAlpha = 1;
+      let graphAlpha = 1;
+
+      const EDGE_COLOR = [24, 24, 24];
+      const NODE_FILL = [27, 117, 219];
+      const NODE_STROKE = [7, 36, 78];
+      const MAX_RANDOM_OFFSET_M = 50;
+      const SCREEN_MARGIN_RATIO = 0.06;
+      const SCREEN_MARGIN_MIN = 24;
+      const SCREEN_MARGIN_MAX = 72;
+
+      try {
+        const [pointsCsv, edgesCsv] = await Promise.all([
+          fetchText("../graph-creation-app/points.csv"),
+          fetchText("../graph-creation-app/edges.csv")
+        ]);
+
+        points = parsePoints(pointsCsv);
+        edges = parseEdges(edgesCsv, points);
+
+        if (!points.length) {
+          throw new Error("Brak poprawnych punktów po wczytaniu points.csv");
+        }
+        if (!edges.length) {
+          throw new Error("Brak poprawnych krawędzi po dopasowaniu do points.csv");
+        }
+
+        setupMap();
+        resizeCanvas();
+        recomputePositions();
+        draw();
+
+        msg.textContent = "Kliknij: 1) płynne ustawienie punktów  2) fade-in mapy";
+        state = 1;
+      } catch (err) {
+        showError(err?.message || String(err));
+        msg.textContent = "Błąd ładowania danych";
+      }
+
+      stage.addEventListener("click", handleAdvance);
+      window.addEventListener("keydown", handleAdvance);
+      window.addEventListener("resize", () => {
+        resizeCanvas();
+        if (map) {
+          map.invalidateSize();
+          fitMapWithMargin();
+          if (state === 1) {
+            randomPositions = [];
+            randomGeoPositions = [];
+          }
+          recomputePositions();
+          draw();
+        }
+      });
+
+      function setupMap() {
+        map = L.map("map", {
+          zoomControl: false,
+          attributionControl: false,
+          preferCanvas: true,
+          dragging: false,
+          scrollWheelZoom: false,
+          doubleClickZoom: false,
+          boxZoom: false,
+          keyboard: false,
+          touchZoom: false,
+          tap: false
+        });
+
+        tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 20,
+          opacity: 0
+        }).addTo(map);
+
+        fitMapWithMargin();
+        buildMapGraphLayers();
+
+        map.once("load", () => {
+          recomputePositions();
+          draw();
+        });
+
+        map.on("moveend zoomend", () => {
+          recomputePositions();
+          draw();
+        });
+      }
+
+      function buildMapGraphLayers() {
+        mapEdgeLines.forEach((l) => map.removeLayer(l));
+        mapNodeCircles.forEach((c) => map.removeLayer(c));
+        mapEdgeLines = [];
+        mapNodeCircles = [];
+
+        for (const e of edges) {
+          const a = points[e.a];
+          const b = points[e.b];
+          const line = L.polyline(
+            [
+              [a.lat, a.lon],
+              [b.lat, b.lon]
+            ],
+            {
+              color: "rgb(12, 54, 134)",
+              weight: 2,
+              opacity: 0
+            }
+          ).addTo(map);
+          mapEdgeLines.push(line);
+        }
+
+        for (const p of points) {
+          const node = L.circleMarker([p.lat, p.lon], {
+            radius: 4.8,
+            weight: 1,
+            color: "rgb(7, 36, 78)",
+            fillColor: "rgb(27, 117, 219)",
+            fillOpacity: 0,
+            opacity: 0
+          }).addTo(map);
+          mapNodeCircles.push(node);
+        }
+      }
+
+      function recomputePositions() {
+        if (!map) return;
+
+        truePositions = points.map((p) => {
+          const pt = map.latLngToContainerPoint([p.lat, p.lon]);
+          return { x: pt.x, y: pt.y };
+        });
+
+        if (!randomGeoPositions.length || randomGeoPositions.length !== points.length) {
+          randomGeoPositions = points.map((p) =>
+            randomOffsetPointMeters(p.lat, p.lon, MAX_RANDOM_OFFSET_M)
+          );
+        }
+
+        randomPositions = randomGeoPositions.map((p) => {
+          const pt = map.latLngToContainerPoint([p.lat, p.lon]);
+          return { x: pt.x, y: pt.y };
+        });
+
+        if (state === 1) {
+          currentPositions = randomPositions.map((p) => ({ ...p }));
+        } else if (state >= 2) {
+          currentPositions = truePositions.map((p) => ({ ...p }));
+        }
+      }
+
+      function fitMapWithMargin() {
+        if (!map || !points.length) return;
+        const metrics = getScreenMetrics();
+        const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lon]));
+        map.fitBounds(bounds, {
+          paddingTopLeft: [metrics.margin, metrics.margin],
+          paddingBottomRight: [metrics.margin, metrics.margin]
+        });
+        map.setZoom(Math.min(map.getZoom() + 1, map.getMaxZoom()));
+      }
+
+      async function handleAdvance() {
+        if (state === 1) {
+          state = 99;
+          msg.textContent = "Animacja ustawiania punktów...";
+          await animateGraphTransition(1400);
+          msg.textContent = "Kliknij ponownie: fade-in mapy";
+          state = 2;
+          return;
+        }
+
+        if (state === 2) {
+          state = 99;
+          msg.textContent = "Fade-in mapy...";
+          await animateMapFade(1400);
+          msg.textContent = "Mapa wyświetlona";
+          state = 3;
+        }
+      }
+
+      function animateGraphTransition(durationMs) {
+        return new Promise((resolve) => {
+          const start = performance.now();
+          const startPositions = currentPositions.map((p) => ({ ...p }));
+
+          function frame(now) {
+            const t = clamp01((now - start) / durationMs);
+            const e = easeInOutCubic(t);
+
+            for (let i = 0; i < currentPositions.length; i++) {
+              currentPositions[i].x = lerp(startPositions[i].x, truePositions[i].x, e);
+              currentPositions[i].y = lerp(startPositions[i].y, truePositions[i].y, e);
+            }
+
+            draw();
+
+            if (t < 1) {
+              requestAnimationFrame(frame);
+            } else {
+              currentPositions = truePositions.map((p) => ({ ...p }));
+              draw();
+              resolve();
+            }
+          }
+
+          requestAnimationFrame(frame);
+        });
+      }
+
+      function animateMapFade(durationMs) {
+        return new Promise((resolve) => {
+          const start = performance.now();
+
+          function frame(now) {
+            const t = clamp01((now - start) / durationMs);
+            const e = easeInOutCubic(t);
+
+            whiteAlpha = 1 - e;
+            graphAlpha = 1 - e;
+
+            if (tileLayer) {
+              tileLayer.setOpacity(e);
+            }
+            for (const line of mapEdgeLines) {
+              line.setStyle({ opacity: e });
+            }
+            for (const node of mapNodeCircles) {
+              node.setStyle({ opacity: e, fillOpacity: 0.95 * e });
+            }
+
+            draw();
+
+            if (t < 1) {
+              requestAnimationFrame(frame);
+            } else {
+              whiteAlpha = 0;
+              graphAlpha = 0;
+              draw();
+              resolve();
+            }
+          }
+
+          requestAnimationFrame(frame);
+        });
+      }
+
+      function draw() {
+        if (!ctx) return;
+        const metrics = getScreenMetrics();
+
+        ctx.clearRect(0, 0, metrics.width, metrics.height);
+
+        if (whiteAlpha > 0) {
+          ctx.save();
+          ctx.globalAlpha = whiteAlpha;
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, metrics.width, metrics.height);
+          ctx.restore();
+        }
+
+        if (graphAlpha <= 0 || !currentPositions.length) {
+          return;
+        }
+
+        ctx.save();
+        ctx.globalAlpha = graphAlpha;
+
+        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = rgb(EDGE_COLOR);
+        ctx.beginPath();
+        for (const e of edges) {
+          const a = currentPositions[e.a];
+          const b = currentPositions[e.b];
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+        }
+        ctx.stroke();
+
+        for (const p of currentPositions) {
+          ctx.beginPath();
+          ctx.fillStyle = rgb(NODE_FILL);
+          ctx.strokeStyle = rgb(NODE_STROKE);
+          ctx.lineWidth = 1.0;
+          ctx.arc(p.x, p.y, 5.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+
+      function parsePoints(csvText) {
+        const rows = parseCsv(csvText);
+        const header = rows[0] || [];
+
+        const idxId = header.indexOf("id");
+        const idxLat = header.indexOf("lat");
+        const idxLon = header.indexOf("lon");
+
+        if (idxId < 0 || idxLat < 0 || idxLon < 0) {
+          throw new Error("points.csv musi mieć kolumny: id, lat, lon");
+        }
+
+        const out = [];
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          const id = Number(row[idxId]);
+          const lat = Number(row[idxLat]);
+          const lon = Number(row[idxLon]);
+          if (Number.isFinite(id) && Number.isFinite(lat) && Number.isFinite(lon)) {
+            out.push({ id, lat, lon });
+          }
+        }
+
+        const unique = new Set(out.map((p) => p.id));
+        if (unique.size !== out.length) {
+          throw new Error("Kolumna id w points.csv musi mieć unikalne wartości");
+        }
+
+        return out;
+      }
+
+      function parseEdges(csvText, pointsArr) {
+        const rows = parseCsv(csvText);
+        const header = rows[0] || [];
+
+        const idxFrom = header.indexOf("from_id");
+        const idxTo = header.indexOf("to_id");
+
+        if (idxFrom < 0 || idxTo < 0) {
+          throw new Error("edges.csv musi mieć kolumny: from_id, to_id");
+        }
+
+        const idToIdx = new Map();
+        pointsArr.forEach((p, i) => idToIdx.set(p.id, i));
+
+        const out = [];
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          const fromId = Number(row[idxFrom]);
+          const toId = Number(row[idxTo]);
+          if (!Number.isFinite(fromId) || !Number.isFinite(toId)) continue;
+
+          const a = idToIdx.get(fromId);
+          const b = idToIdx.get(toId);
+          if (a === undefined || b === undefined || a === b) continue;
+
+          out.push({ a, b });
+        }
+
+        return out;
+      }
+
+      function parseCsv(text) {
+        const lines = text
+          .replace(/^\uFEFF/, "")
+          .split(/\r?\n/)
+          .filter((line) => line.trim().length > 0);
+
+        return lines.map((line) => {
+          const cells = [];
+          let curr = "";
+          let inQuotes = false;
+
+          for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '"') {
+              if (inQuotes && line[i + 1] === '"') {
+                curr += '"';
+                i++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (ch === "," && !inQuotes) {
+              cells.push(curr.trim());
+              curr = "";
+            } else {
+              curr += ch;
+            }
+          }
+
+          cells.push(curr.trim());
+          return cells;
+        });
+      }
+
+      async function fetchText(path) {
+        const res = await fetch(path, { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error(`Nie udało się pobrać ${path} (HTTP ${res.status})`);
+        }
+        return res.text();
+      }
+
+      function resizeCanvas() {
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const w = stage.clientWidth;
+        const h = stage.clientHeight;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        canvas.style.width = `${w}px`;
+        canvas.style.height = `${h}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function getScreenMetrics() {
+        const width = stage.clientWidth;
+        const height = stage.clientHeight;
+        const margin = Math.max(
+          SCREEN_MARGIN_MIN,
+          Math.min(SCREEN_MARGIN_MAX, Math.round(Math.min(width, height) * SCREEN_MARGIN_RATIO))
+        );
+        return { width, height, margin };
+      }
+
+      function randomOffsetPointMeters(lat, lon, maxMeters) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * maxMeters;
+        const dx = Math.cos(angle) * radius; // metry na wschod
+        const dy = Math.sin(angle) * radius; // metry na polnoc
+
+        const metersPerDegLat = 111320;
+        const metersPerDegLon = Math.max(1e-6, 111320 * Math.cos((lat * Math.PI) / 180));
+
+        return {
+          lat: lat + dy / metersPerDegLat,
+          lon: lon + dx / metersPerDegLon
+        };
+      }
+
+      function showError(message) {
+        errorEl.style.display = "block";
+        errorEl.textContent =
+          message +
+          "\n\nUwaga: otwieraj ten plik przez lokalny serwer HTTP (np. Live Server), a nie jako file://.";
+      }
+
+      function lerp(a, b, t) {
+        return a + (b - a) * t;
+      }
+
+      function clamp01(x) {
+        return Math.max(0, Math.min(1, x));
+      }
+
+      function easeInOutCubic(t) {
+        return t < 0.5
+          ? 4 * t * t * t
+          : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      }
+
+      function rgb(arr) {
+        return `rgb(${arr[0]}, ${arr[1]}, ${arr[2]})`;
+      }
+    })();
+  </script>
+</body>
+</html>

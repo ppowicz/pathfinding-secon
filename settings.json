@@ -1,0 +1,11 @@
+{
+  "fileVersion": 1,
+  "mapCenter": {
+    "lat": 52.253,
+    "lon": 20.8993
+  },
+  "mapZoom": 18,
+  "lastMode": "points",
+  "nextPointId": 1,
+  "nextEdgeId": 1
+}

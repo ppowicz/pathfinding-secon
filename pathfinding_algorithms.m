@@ -84,6 +84,11 @@ function pathfinding_algorithms()
     footerLabel.FontSize = 13;
     footerLabel.Text = "Ładowanie danych...";
 
+    clearRouteButton = uibutton(fig, "push");
+    clearRouteButton.Text = "Wyczyść";
+    clearRouteButton.Position = [995 15 85 30];
+    clearRouteButton.Enable = "off";
+
     % POLE WYNIKÓW (UKRYTE - dane dostępne przez przycisk Kopiuj)
     resultsTextArea = uitextarea(fig);
     resultsTextArea.Position = [20 50 860 45];
@@ -143,6 +148,7 @@ function pathfinding_algorithms()
 
     % Przycisk resetu widoku
     resetButton.ButtonPushedFcn = @(btn, event) resetMapView();
+    clearRouteButton.ButtonPushedFcn = @(btn, event) clearLastRoute();
 
     % Przycisk wyznaczania trasy
     findPathButton.ButtonPushedFcn = @(btn, event) handleFindPath();
@@ -261,11 +267,13 @@ function pathfinding_algorithms()
         footerLabel.Text = "Gotowe: " + formatDisplayNumber(numberOfNodes) + " węzłów, " + formatDisplayNumber(numberOfEdges) + " krawędzi";
 
         resetButton.Enable = "on";
+        clearRouteButton.Enable = "on";
         copyButton.Enable = "off";
 
     catch ME
         footerLabel.Text = "Błąd ładowania danych: " + ME.message;
         resetButton.Enable = "off";
+        clearRouteButton.Enable = "off";
         copyButton.Enable = "off";
         startInput.Enable = "off";
         targetInput.Enable = "off";
@@ -660,6 +668,11 @@ function pathfinding_algorithms()
             clipboard('copy', lastResultsCsv);
             footerLabel.Text = "✓ Wynik skopiowany do schowka";
         end
+    end
+
+    function clearLastRoute()
+        clearSearchVisuals();
+        footerLabel.Text = "Wyczyszczono ostatnio wyznaczoną trasę.";
     end
 
     function clearSearchVisuals()
